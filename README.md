@@ -75,6 +75,9 @@ Install from PyPI:
 python -m pip install nanotime
 ```
 
+Publishing to PyPI from GitHub Releases requires a `PYPI_API_TOKEN` secret on the
+repo (PyPI token with upload permission) because releases are uploaded with `twine`.
+
 Or install from GitHub:
 
 ```bash
