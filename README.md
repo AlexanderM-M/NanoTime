@@ -69,7 +69,13 @@ nanoTime requires Python 3.10 or newer. Installing it also installs
 [pysam](https://pysam.readthedocs.io/), which bundles the required htslib
 functionality.
 
-From a future GitHub checkout:
+Install from PyPI:
+
+```bash
+python -m pip install nanotime
+```
+
+Or install from GitHub:
 
 ```bash
 git clone https://github.com/AlexanderM-M/NanoTime.git nanoTime
