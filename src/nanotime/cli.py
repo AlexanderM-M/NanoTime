@@ -117,6 +117,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace nanoTime output files with the same names",
     )
+    split.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "load read timestamps into memory for faster assignment/summarization "
+            "(higher RAM usage)"
+        ),
+    )
+    progress = split.add_mutually_exclusive_group()
+    progress.add_argument(
+        "--progress",
+        action="store_true",
+        dest="progress",
+        help="show per-file progress updates",
+    )
+    progress.add_argument(
+        "--no-progress",
+        dest="progress",
+        action="store_false",
+        help="hide per-file progress updates",
+    )
+    split.set_defaults(progress=sys.stderr.isatty())
     return parser
 
 
@@ -139,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
             index=not args.no_index,
             force=args.force,
             missing=args.missing,
+            progress=args.progress,
+            fast=args.fast,
         )
         print(
             "Scanning timestamps, assigning alignments, and finalizing BAMs...",

@@ -144,6 +144,9 @@ after the final read.
 --threads N             Sorting/indexing threads
 --no-index              Do not create BAM indexes
 --missing error|skip    Policy for reads with no timestamp (default: error)
+--fast                  Load read timestamps into RAM for faster splitting
+--progress              Force progress output on non-interactive terminals
+--no-progress           Hide progress output
 --force                 Replace same-named nanoTime outputs
 ```
 
@@ -172,8 +175,10 @@ primary, secondary, and supplementary records written to the BAM.
 - Reads before clock zero and reads at or after `--until` are excluded.
 - Cumulative mode necessarily writes early reads into multiple files, so it
   uses more time and disk space than disjoint mode.
-- nanoTime uses a temporary on-disk SQLite map inside the output directory,
-  keeping memory usage bounded for large runs. It is removed after completion.
+- By default, nanoTime uses a temporary on-disk SQLite map inside the output
+  directory to keep memory usage bounded on large runs.
+- `--fast` keeps the read timestamp map in RAM for faster splitting at the cost
+  of higher memory usage.
 
 ## Why not split by BAM file?
 

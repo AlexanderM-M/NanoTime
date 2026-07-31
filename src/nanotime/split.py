@@ -8,7 +8,9 @@ import glob
 import math
 import os
 import sqlite3
+import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -37,6 +39,8 @@ class SplitConfig:
     index: bool = True
     force: bool = False
     missing: str = "error"
+    progress: bool = True
+    fast: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,7 @@ class ScanResult:
     tagged_records: int
     unique_reads: int
     header: dict
+    read_metadata: dict[str, tuple[int, int]] | None
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,34 @@ class OutputWindow:
     start_ns: int
     end_ns: int
     path: Path
+
+
+def _progress_update(
+    enabled: bool,
+    phase: str,
+    index: int,
+    total: int,
+    path: Path,
+) -> None:
+    if not enabled:
+        return
+    percent = (index / total * 100) if total else 100.0
+    if sys.stderr.isatty():
+        print(
+            f"\r{phase:>9} {index}/{total} ({percent:>5.1f}%) {path.name:<48}",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        print(f"{phase}: {index}/{total}: {path}", file=sys.stderr)
+
+
+def _progress_done(enabled: bool) -> None:
+    if not enabled:
+        return
+    if sys.stderr.isatty():
+        print("", file=sys.stderr)
 
 
 def expand_inputs(patterns: Sequence[str]) -> list[Path]:
@@ -153,22 +186,32 @@ def _add_program_record(header: dict) -> dict:
 
 def scan_inputs(
     inputs: Sequence[Path],
-    database: sqlite3.Connection,
+    database: sqlite3.Connection | None,
     timestamp_mode: str,
     origin_option: str,
+    *,
+    use_fast: bool = False,
+    show_progress: bool = False,
 ) -> ScanResult:
-    """Scan timestamps into SQLite and validate the BAM headers."""
-    database.execute(
-        """
-        CREATE TABLE reads (
-            name TEXT PRIMARY KEY,
-            start_ns INTEGER NOT NULL,
-            duration_ns INTEGER NOT NULL,
-            event_ns INTEGER NOT NULL,
-            bases INTEGER NOT NULL
+    """Scan timestamps and validate BAM headers."""
+    if database is not None:
+        database.execute("PRAGMA synchronous = OFF")
+        database.execute("PRAGMA journal_mode = MEMORY")
+        database.execute("PRAGMA temp_store = MEMORY")
+        database.execute(
+            """
+            CREATE TABLE reads (
+                name TEXT PRIMARY KEY,
+                start_ns INTEGER NOT NULL,
+                duration_ns INTEGER NOT NULL,
+                event_ns INTEGER NOT NULL,
+                bases INTEGER NOT NULL
+            )
+            """
         )
-        """
-    )
+    elif not use_fast:
+        raise NanoTimeError("database is required unless --fast is enabled")
+
     first_header: dict | None = None
     signature: tuple | None = None
     read_groups: dict[str, dict] = {}
@@ -177,11 +220,20 @@ def scan_inputs(
     max_event_ns: int | None = None
     tagged_records = 0
 
-    for path in inputs:
+    # fast mode keeps (event_ns, bases) for every read in RAM and avoids SQLite
+    # lookups during reassignment.
+    fast_metadata: dict[str, tuple[int, int]] | None = {} if use_fast else None
+    fast_full: dict[str, tuple[int, int, int, int]] = {} if use_fast else {}
+    total_inputs = len(inputs)
+
+    for file_index, path in enumerate(inputs, start=1):
+        if show_progress:
+            _progress_update(show_progress, "scan", file_index, total_inputs, path)
         try:
             bam = pysam.AlignmentFile(str(path), "rb", check_sq=False)
         except (OSError, ValueError) as exc:
             raise NanoTimeError(f"cannot open BAM {path}: {exc}") from exc
+
         with bam:
             header_dict = bam.header.to_dict()
             current_signature = _header_signature(bam.header)
@@ -206,8 +258,7 @@ def scan_inputs(
                     )
 
             try:
-                records = bam.fetch(until_eof=True)
-                for record in records:
+                for record in bam.fetch(until_eof=True):
                     if not record.has_tag("st"):
                         continue
                     start_ns, read_duration_ns, event_ns = _read_event_ns(
@@ -215,26 +266,49 @@ def scan_inputs(
                     )
                     tagged_records += 1
                     bases = record.query_length or 0
-                    existing = database.execute(
-                        "SELECT start_ns, duration_ns, event_ns, bases "
-                        "FROM reads WHERE name = ?",
-                        (record.query_name,),
-                    ).fetchone()
                     values = (start_ns, read_duration_ns, event_ns, bases)
-                    if existing is None:
-                        database.execute(
-                            "INSERT INTO reads VALUES (?, ?, ?, ?, ?)",
-                            (record.query_name, *values),
-                        )
-                    elif tuple(existing[:3]) != values[:3]:
-                        raise NanoTimeError(
-                            f"read {record.query_name!r} has conflicting timestamp tags"
-                        )
-                    elif bases > existing[3]:
-                        database.execute(
-                            "UPDATE reads SET bases = ? WHERE name = ?",
-                            (bases, record.query_name),
-                        )
+                    if use_fast and fast_metadata is not None:
+                        existing = fast_full.get(record.query_name)
+                        if existing is None:
+                            fast_full[record.query_name] = values
+                            fast_metadata[record.query_name] = (event_ns, bases)
+                        else:
+                            if tuple(existing[:3]) != values[:3]:
+                                raise NanoTimeError(
+                                    f"read {record.query_name!r} has conflicting timestamp tags"
+                                )
+                            if bases > existing[3]:
+                                fast_full[record.query_name] = (
+                                    existing[0],
+                                    existing[1],
+                                    existing[2],
+                                    bases,
+                                )
+                                fast_metadata[record.query_name] = (
+                                    existing[2],
+                                    bases,
+                                )
+                    else:
+                        existing = database.execute(
+                            "SELECT start_ns, duration_ns, event_ns, bases "
+                            "FROM reads WHERE name = ?",
+                            (record.query_name,),
+                        ).fetchone()
+                        if existing is None:
+                            database.execute(
+                                "INSERT INTO reads VALUES (?, ?, ?, ?, ?)",
+                                (record.query_name, *values),
+                            )
+                        elif tuple(existing[:3]) != values[:3]:
+                            raise NanoTimeError(
+                                f"read {record.query_name!r} has conflicting timestamp tags"
+                            )
+                        elif bases > existing[3]:
+                            database.execute(
+                                "UPDATE reads SET bases = ? WHERE name = ?",
+                                (bases, record.query_name),
+                            )
+
                     min_start_ns = (
                         start_ns if min_start_ns is None else min(min_start_ns, start_ns)
                     )
@@ -243,7 +317,8 @@ def scan_inputs(
                     )
             except OSError as exc:
                 raise NanoTimeError(f"failed while reading BAM {path}: {exc}") from exc
-        database.commit()
+        if database is not None:
+            database.commit()
 
     if min_start_ns is None or max_event_ns is None or first_header is None:
         raise NanoTimeError(
@@ -261,7 +336,9 @@ def scan_inputs(
         except ValueError as exc:
             raise NanoTimeError(f"invalid --origin value: {exc}") from exc
 
-    unique_reads = database.execute("SELECT COUNT(*) FROM reads").fetchone()[0]
+    unique_reads = len(fast_metadata) if use_fast and fast_metadata is not None else database.execute(
+        "SELECT COUNT(*) FROM reads"
+    ).fetchone()[0]
     if read_groups:
         first_header["RG"] = list(read_groups.values())
     return ScanResult(
@@ -271,6 +348,7 @@ def scan_inputs(
         tagged_records=tagged_records,
         unique_reads=unique_reads,
         header=_add_program_record(first_header),
+        read_metadata=fast_metadata,
     )
 
 
@@ -334,9 +412,7 @@ def _check_outputs(windows: Sequence[OutputWindow], force: bool) -> None:
         )
 
 
-def _lookup_event(
-    database: sqlite3.Connection, name: str
-) -> tuple[int, int] | None:
+def _lookup_event(database: sqlite3.Connection, name: str) -> tuple[int, int] | None:
     row = database.execute(
         "SELECT event_ns, bases FROM reads WHERE name = ?", (name,)
     ).fetchone()
@@ -408,25 +484,65 @@ def _summarize_reads(
     return counts, bases
 
 
+def _summarize_reads_fast(
+    read_metadata: dict[str, tuple[int, int]],
+    origin_ns: int,
+    boundaries: Sequence[int],
+    cumulative: bool,
+) -> tuple[list[int], list[int]]:
+    counts = [0] * len(boundaries)
+    bases = [0] * len(boundaries)
+    for event_ns, read_bases in read_metadata.values():
+        elapsed = event_ns - origin_ns
+        index = bisect.bisect_right(boundaries, elapsed)
+        if elapsed < 0 or index >= len(boundaries):
+            continue
+        if cumulative:
+            for target in range(index, len(boundaries)):
+                counts[target] += 1
+                bases[target] += read_bases
+        else:
+            counts[index] += 1
+            bases[index] += read_bases
+    return counts, bases
+
+
 def split_bams(config: SplitConfig) -> list[OutputWindow]:
     """Split BAM inputs according to acquisition timestamps."""
     inputs = expand_inputs(config.inputs)
     config.output.mkdir(parents=True, exist_ok=True)
+    progress_enabled = config.progress
+
+    if not progress_enabled:
+        progress_enabled = False
 
     with tempfile.TemporaryDirectory(prefix=".nanotime-", dir=config.output) as temp_name:
         temp_dir = Path(temp_name)
-        database = sqlite3.connect(temp_dir / "reads.sqlite")
+        database: sqlite3.Connection | None = None
+        if not config.fast:
+            database = sqlite3.connect(temp_dir / "reads.sqlite")
         try:
+            scan_start = time.perf_counter()
             scan = scan_inputs(
-                inputs, database, config.timestamp_mode, config.origin
+                inputs,
+                database,
+                config.timestamp_mode,
+                config.origin,
+                use_fast=config.fast,
+                show_progress=progress_enabled,
             )
+            _progress_done(progress_enabled)
+            if progress_enabled:
+                elapsed = time.perf_counter() - scan_start
+                print(
+                    f"Scanned {scan.tagged_records} st-tagged records from {len(inputs)} BAM(s) in "
+                    f"{elapsed:.1f}s",
+                    file=sys.stderr,
+                )
+
             if config.until_ns is None:
                 elapsed = max(1, scan.max_event_ns - scan.origin_ns)
-                # Windows are half-open, so an event exactly on a boundary belongs
-                # in the next window.
-                until_ns = (
-                    (elapsed // config.interval_ns) + 1
-                ) * config.interval_ns
+                until_ns = ((elapsed // config.interval_ns) + 1) * config.interval_ns
             else:
                 until_ns = config.until_ns
             if until_ns <= 0:
@@ -445,13 +561,21 @@ def split_bams(config: SplitConfig) -> list[OutputWindow]:
             ]
             record_counts = [0] * len(windows)
             missing_names: set[str] = set()
+            fast_map = scan.read_metadata
+            assign_start = time.perf_counter()
+            total_inputs = len(inputs)
             try:
-                for input_path in inputs:
-                    with pysam.AlignmentFile(
-                        str(input_path), "rb", check_sq=False
-                    ) as bam:
+                for input_index, input_path in enumerate(inputs, start=1):
+                    if progress_enabled:
+                        _progress_update(
+                            progress_enabled, "assign", input_index, total_inputs, input_path
+                        )
+                    with pysam.AlignmentFile(str(input_path), "rb", check_sq=False) as bam:
                         for record in bam.fetch(until_eof=True):
-                            lookup = _lookup_event(database, record.query_name)
+                            if fast_map is not None:
+                                lookup = fast_map.get(record.query_name)
+                            else:
+                                lookup = _lookup_event(database, record.query_name)
                             if lookup is None:
                                 if config.missing == "skip":
                                     missing_names.add(record.query_name)
@@ -476,8 +600,26 @@ def split_bams(config: SplitConfig) -> list[OutputWindow]:
             finally:
                 for writer in writers:
                     writer.close()
+            _progress_done(progress_enabled)
+            if progress_enabled:
+                assign_elapsed = time.perf_counter() - assign_start
+                print(
+                    f"Assigned reads to {len(windows)} window(s) in {assign_elapsed:.1f}s",
+                    file=sys.stderr,
+                )
+                if missing_names:
+                    print(f"Missing st tag for {len(missing_names)} query names", file=sys.stderr)
 
+            final_start = time.perf_counter()
             for raw_path, window in zip(raw_paths, windows):
+                if progress_enabled:
+                    if sys.stderr.isatty():
+                        print(
+                            f"Finalizing {window.path.name}",
+                            end="",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                 try:
                     pysam.sort(
                         "-@",
@@ -492,10 +634,29 @@ def split_bams(config: SplitConfig) -> list[OutputWindow]:
                     raise NanoTimeError(
                         f"samtools failed while finalizing {window.path.name}: {exc}"
                     ) from exc
+                if progress_enabled and sys.stderr.isatty():
+                    print(" ✓", file=sys.stderr)
 
-            read_counts, base_counts = _summarize_reads(
-                database, scan.origin_ns, boundaries, config.cumulative
-            )
+            if progress_enabled:
+                final_elapsed = time.perf_counter() - final_start
+                print(
+                    f"Finalized {len(windows)} BAM(s) in {final_elapsed:.1f}s",
+                    file=sys.stderr,
+                )
+
+            if scan.read_metadata is not None:
+                read_counts, base_counts = _summarize_reads_fast(
+                    scan.read_metadata,
+                    scan.origin_ns,
+                    boundaries,
+                    config.cumulative,
+                )
+            elif database is None:
+                raise NanoTimeError("missing read metadata for summary")
+            else:
+                read_counts, base_counts = _summarize_reads(
+                    database, scan.origin_ns, boundaries, config.cumulative
+                )
             _write_summary(
                 config.output / "timeline_summary.tsv",
                 windows,
@@ -507,4 +668,5 @@ def split_bams(config: SplitConfig) -> list[OutputWindow]:
             )
             return windows
         finally:
-            database.close()
+            if database is not None:
+                database.close()
