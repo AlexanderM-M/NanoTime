@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nanotime"
+version = "0.1.0"
+description = "Split Oxford Nanopore BAM files into exact sequencing-time intervals."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  { name = "nanoTime contributors" },
+]
+keywords = ["nanopore", "bam", "dorado", "sequencing", "bioinformatics"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "pysam>=0.22",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8",
+]
+
+[project.scripts]
+nanotime = "nanotime.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/AlexanderM-M/nanoTime"
+Issues = "https://github.com/AlexanderM-M/nanoTime/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nanotime"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
