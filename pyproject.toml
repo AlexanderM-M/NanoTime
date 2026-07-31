@@ -38,8 +38,8 @@ test = [
 nanotime = "nanotime.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/AlexanderM-M/nanoTime"
-Issues = "https://github.com/AlexanderM-M/nanoTime/issues"
+Homepage = "https://github.com/AlexanderM-M/NanoTime"
+Issues = "https://github.com/AlexanderM-M/NanoTime/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nanotime"]

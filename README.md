@@ -72,7 +72,7 @@ functionality.
 From a future GitHub checkout:
 
 ```bash
-git clone https://github.com/AlexanderM-M/nanoTime.git
+git clone https://github.com/AlexanderM-M/NanoTime.git
 cd nanoTime
 python -m pip install .
 ```
