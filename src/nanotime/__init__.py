@@ -1,3 +1,3 @@
-"""nanoTime: exact sequencing-time BAM intervals."""
+"""NanoTime: Oxford Nanopore acquisition timelines and BAM checkpoints."""
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"

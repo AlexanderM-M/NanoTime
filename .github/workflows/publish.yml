@@ -9,7 +9,7 @@ jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -25,6 +25,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip build twine
           python -m build
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --generate-notes \
+            --title "NanoTime $GITHUB_REF_NAME"
 
       - name: Publish to PyPI
         env:

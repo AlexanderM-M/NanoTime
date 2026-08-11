@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nanotime"
-version = "0.1.2"
-description = "Split Oxford Nanopore BAM files into exact sequencing-time intervals."
+name = "nanotime-ont"
+version = "0.2.0"
+description = "Inspect and split Oxford Nanopore BAM files by acquisition time or yield."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
