@@ -44,6 +44,21 @@ def test_cli_inspect_and_timeline(tmp_path: Path, capsys):
         "0\t60\t1\t1\t100\t100",
     ]
 
+    image = tmp_path / "timeline.png"
+    assert main(
+        ["plot", str(bam), "--bin", "1m", "--output", str(image), "--no-progress"]
+    ) == 0
+    assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert image.stat().st_size > 10_000
+
+
+def test_cli_plot_rejects_unknown_image_format(tmp_path: Path, capsys):
+    bam = _bam(tmp_path / "input.bam")
+    assert main(
+        ["plot", str(bam), "--bin", "1m", "--output", str(tmp_path / "plot.jpg"), "--no-progress"]
+    ) == 2
+    assert "must end in .png, .svg, or .pdf" in capsys.readouterr().err
+
 
 def test_cli_dry_run_creates_no_output(tmp_path: Path, capsys):
     bam = _bam(tmp_path / "input.bam")

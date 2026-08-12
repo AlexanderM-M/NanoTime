@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-08-12
+
+- Add `nanotime plot` for a two-panel cumulative-yield and binned-throughput figure.
+- Support PNG, SVG, and PDF plots with automatic elapsed-time and base-unit scaling.
+- Add a documented example visualization and keep Matplotlib in the optional `plot` extra.
+- Make PyPI publishing opt-in until a trusted publisher is configured.
+
 ## 0.2.0 - 2026-08-11
 
 - Rename the PyPI distribution to `nanotime-ont`; keep the `nanotime` command.

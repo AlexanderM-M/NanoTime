@@ -198,6 +198,23 @@ def build_parser() -> argparse.ArgumentParser:
     timeline.add_argument("--output", "-o", type=Path, help="write TSV to this path (default: standard output)")
     _add_clock_options(timeline)
     _add_progress_options(timeline)
+
+    plot = subparsers.add_parser(
+        "plot",
+        help="plot cumulative yield and binned throughput",
+    )
+    _add_inputs(plot)
+    plot.add_argument("--bin", required=True, type=_duration_argument, metavar="DURATION", help="timeline bin width, e.g. 1m or 10m")
+    plot.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=Path("timeline.png"),
+        help="image path ending in .png, .svg, or .pdf (default: timeline.png)",
+    )
+    plot.add_argument("--title", default="NanoTime sequencing timeline", help="figure title")
+    _add_clock_options(plot)
+    _add_progress_options(plot)
     return parser
 
 
@@ -307,6 +324,29 @@ def _write_timeline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _plot_timeline(args: argparse.Namespace) -> int:
+    from .plot import save_timeline_plot
+
+    report = timeline_bams(
+        args.inputs,
+        args.bin,
+        origin=args.origin,
+        timestamp_mode=args.timestamp,
+        allow_multiple_runs=args.allow_multiple_runs,
+        fast=args.fast,
+        progress=args.progress,
+    )
+    output = save_timeline_plot(
+        report.rows,
+        report.bin_ns,
+        args.output.resolve(),
+        title=args.title,
+    )
+    _print_warnings(report.scan.warnings)
+    print(f"Wrote {len(report.rows)} timeline bin(s) to {output}")
+    return 0
+
+
 def _split_config(args: argparse.Namespace) -> SplitConfig:
     yield_targets = getattr(args, "yield_targets", None)
     cumulative = bool(getattr(args, "cumulative", False))
@@ -388,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_inspect(args)
         if args.command == "timeline":
             return _write_timeline(args)
+        if args.command == "plot":
+            return _plot_timeline(args)
         if args.command in {"split", "manifest"}:
             return _run_split(args)
     except (NanoTimeError, OSError, ValueError) as exc:

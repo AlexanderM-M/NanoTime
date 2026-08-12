@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nanotime-ont"
-version = "0.2.0"
+version = "0.3.0"
 description = "Inspect and split Oxford Nanopore BAM files by acquisition time or yield."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,9 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "pytest>=8",
+]
+plot = [
+  "matplotlib>=3.8",
 ]
 
 [project.scripts]

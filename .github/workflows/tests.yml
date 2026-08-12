@@ -15,5 +15,5 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install -e ".[test]"
+      - run: python -m pip install -e ".[test,plot]"
       - run: pytest

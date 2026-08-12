@@ -60,6 +60,7 @@ jobs:
           fi
 
   pypi-publish:
+    if: vars.PYPI_PUBLISH == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:

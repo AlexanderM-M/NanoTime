@@ -2,7 +2,9 @@
 
 NanoTime reconstructs Oxford Nanopore sequencing timelines from BAM acquisition
 metadata. It can inspect a run without writing output, create elapsed-time or
-yield-based BAM checkpoints, and export a small throughput table for plotting.
+yield-based BAM checkpoints, and visualize sequencing throughput.
+
+![Example NanoTime two-panel sequencing timeline](docs/images/timeline-example.png)
 
 ```bash
 nanotime inspect *.bam
@@ -24,6 +26,12 @@ python -m pip install nanotime-ont
 nanotime --version
 ```
 
+Install the optional plotting support with:
+
+```bash
+python -m pip install "nanotime-ont[plot]"
+```
+
 To install from source:
 
 ```bash
@@ -35,7 +43,7 @@ python -m pip install .
 For development:
 
 ```bash
-python -m pip install -e ".[test]"
+python -m pip install -e ".[test,plot]"
 pytest
 ```
 
@@ -123,6 +131,20 @@ The TSV columns are:
 ```text
 bin_start_seconds  bin_end_seconds  new_reads  cumulative_reads  new_bases  cumulative_bases
 ```
+
+## Plot yield and throughput
+
+Create a two-panel timeline directly from the BAM acquisition metadata:
+
+```bash
+nanotime plot *.bam --bin 5m --output timeline.png
+```
+
+The top panel shows cumulative sequence yield. The lower panel shows new bases
+per time bin on the same elapsed-time axis. NanoTime automatically chooses
+readable time and base units and adds total yield, read count, and run duration
+to the figure. PNG, SVG, and PDF output are supported; use `--title` to set a
+sample or experiment name.
 
 ## Preview disk use
 
